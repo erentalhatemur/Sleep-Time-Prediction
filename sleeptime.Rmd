@@ -1,0 +1,343 @@
+---
+title:  "Sleep-Time Prediction"
+author: "Eren Talha Temur"
+date: "01/01/2025"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Önce gerekli kütüphaneleri indirmeliyiz
+```{r}
+options(warn=-1)
+options(message=FALSE)
+library(ggplot2) # Veri görselleştirme ve grafik oluşturmak için
+library(dplyr) # Veri manipülasyonu ve temizleme işlemi için kullanırız.
+library(broom) # regresyon sonuçlarını tabloya dönüştürmek için kullanırız 
+library(ggpubr) # ggplot2'ye yardımcı kütüphanedir. 
+library(ISLR) # istatistiksel öğrenme için kullanılan veri seti koleksiyonudur.
+library(PerformanceAnalytics) # Finansal veri analizi ve zaman serisi görselleştirme araçları sağlar. Risk yönetimi ve portföy analizi için kullanılır.
+library(lmtest) # doğrusal model üstüne hipotez testleri yapar
+library(faraway) # regresyon modelleme ve analiz uygulamaları için araçlar
+library(mice) # eksik verileri düzenlemek ve işlemek için kullanırız
+library(caret) # makine öğrenmesi modeli oluşturup eğitmek,analiz etmek için kullanırız.
+
+
+options(scipen = 999)
+```
+
+## Veriyi hazırlamak ve Overfitting riskini azaltmak için test-eğitim parçalaması yapıp, gerekli işlemleri uygularız.
+```{r}
+model_data <- read.csv("sleeptime_prediction_dataset.csv")
+model_data <- model_data %>% filter(WorkoutTime+ PhoneTime + WorkHours + RelaxationTime + SleepTime <= 24)
+#Veriye ön inceleme uyguladığımızda,bazı satırlarda 
+#verilen zaman dilimleri toplamlarının 24 saati geçtiğini gözlemledik.
+#Bunun üzerine daha doğru tahminler yapabilmek adına veriyi filtreledik.
+set.seed(145)
+sampleindex <- sample(1:nrow(model_data), size = 0.8 * nrow(model_data))
+egitimset <- model_data[sampleindex, ]
+testset <- model_data[-sampleindex, ]
+
+# Eğitim verisinde değişkenler arası korelasyonu görelim.
+cor(egitimset)
+
+#Bazı değişkenler arası ilişkiyi görselleştirelim
+#Görselleştirme üzerinden aykırı değer varlığı gözlemledik.
+plot(model_data$WorkHours, model_data$SleepTime, xlab = "Work Hours", ylab = "Sleep Time")
+plot(model_data$RelaxationTime, model_data$SleepTime,xlab = "Relaxation Time", ylab = "Sleep Time")
+
+
+
+
+```
+
+## Aykırı Değer tespiti ve verinin doğru hale getirilmesi
+```{r}
+dist <- mahalanobis(egitimset, center = colMeans(egitimset), cov = cov(egitimset))
+cutoff <- qchisq(p = 0.95, df = ncol(egitimset))
+index <- which(dist > cutoff)
+egitimsettemiz <- egitimset[-index, ]
+
+# Temizlenmiş veriyi görselize etme, inceleme
+plot(egitimsettemiz$WorkHours, egitimsettemiz$SleepTime, 
+     xlab = "Work Hours", ylab = "Sleep Time")
+cor(egitimsettemiz)
+```
+
+## Modeli kurma, aykırı değerlerden sıyrılmış veri ile aykırı değerleri içeren modelin karşılaştırılması
+```{r}
+model1 <- lm(SleepTime ~ ., data = egitimset)
+model2 <- lm(SleepTime ~ ., data = egitimsettemiz)
+
+summary(model1)
+summary(model2)
+
+#MODEL 1 İÇİN  
+
+#WorkoutTime (beta1):Egzersiz yapılan süre 1 birim arttıkça, uyku süresi ortalama 0.436 saat artıyor.
+
+#ReadingTime (beta2):Okuma yapılan süre 1 birim arttıkça, uyku süresi 0.2608 saat artıyor.
+
+#PhoneTime (beta3):Telefon kullanım 1 birim arttıkça, uyku süresi -0.5688 saat azalıyor.
+
+#WorkHours (beta4):Çalışma süresi 1 birim arttıkça, uyku süresi -0.382 saat azalıyor.
+
+#CaffeineIntake (beta5):Kafein tüketimi 1 birim arttıkça, uyku süresi -0.0018 saat azalıyor
+
+#RelaxationTime (beta6):Dinlenme süresi 1 birim arttıkça, uyku süresi 0.3564 saat artıyor.
+
+
+#MODEL 2 İÇİN 
+#WorkoutTime (beta1):Egzersiz yapılan 1 birim arttıkça, uyku süresi ortalama 0.452 saat artıyor.
+#İlk modele göre etkisi biraz daha yüksek.
+
+#ReadingTime (beta2):Okuma yapılan süre 1 birim arttıkça, uyku süresi 0.2696 saat artıyor.
+
+#PhoneTime (beta3):Telefon kullanımı 1 birim arttıkça, uyku süresi -0.5608 saat azalıyor.
+
+#WorkHours (beta4):Çalışma süresi 1 birim arttıkça, uyku süresi -0.3747 saat azalıyor.
+
+#CaffeineIntake (beta5):Kafein tüketimi 1 birim arttıkça, uyku süresi -0.0019 saat azalıyor.
+
+#RelaxationTime (beta6):Dinlenme süresi 1 birim arttıkça, uyku süresi 0.371 saat artıyor.
+
+#Telefon kullanımı ve çalışma saatleri uyku süresi üzerinde en negatif etkilerden biri.
+#Egzersiz, okuma ve dinlenme ise olumlu etkiler sağlıyor.
+
+```
+##Nihai model için hataların aykırı değer kontrolü
+```{r}
+standartlasmis_hata<-rstandard(model2) #hataları standartlaştırdık
+summary(standartlasmis_hata) #Değerlendirme için özetini aldık.
+#SUMMARY ÜZERİNDEN YORUM;
+#REFERANS OLARAK -2/+2 ARALIĞINI ALARAK,HANGİ GÖZLEMLERİN BU ARALIK DIŞINDA KALDIĞINI BELİRLEYECEĞİZ.
+indeksler<-which(abs(standartlasmis_hata)>2)
+length(indeksler)
+#49 tane hatamız OUTLIER olma potansiyeline sahip.
+
+#ŞİMDİ COOK'S DISTANCE KULLANARAK AYKIRI DEĞER TESPİTİ YAPACAĞIZ VE 
+#BU İKİ ÖLÇÜM SONUCUNDA MODELDEN TEMİZLENMESİ GEREKENLERİ BELİRLEYECEĞİZ.
+distance<-cooks.distance(model2)
+olcut_1<-mean(distance)*3
+olcut_2<-4/length(distance)
+#Eğer bir gözlemin Cook's distance mesafesi burada verdiğimiz ölcütlerden herhangi birini aşar ise, o gözlem genellikle aykırı olarak değerlendirilir.ölcütlerimiz birbirine cok yakın deger ürettigi icin olcut2'yi referans alıyoruz.
+
+#TESTLER SONUCU BELİRLENEN AYKIRILARIN TEMİZLENMESİ
+aykiri<-which(distance>olcut_1&abs(standartlasmis_hata)>2)
+egitimsettemiz<-egitimsettemiz[-aykiri,]
+nrow(egitimsettemiz)
+
+#VERİMİZDEN HATALARIN AYKIRISINI DA TEMİZLEDİKTEN SONRA 1534'TEN 1485'E BİR DÜŞÜŞ GÖZLEMLEDİK.
+#ŞİMDİ TEMİZ VERİMİZİ KULLANARAK NİHAİ MODEL OLAN MODEL2'Yİ TEKRAR OLUŞTURUYORUZ.
+model2 <- lm(SleepTime ~ ., data = egitimsettemiz)
+summary(model2)
+
+#MODEL 2'NİN YENİDEN YORUMLANMASI
+#WorkoutTime (beta1):Egzersiz yapılan 1 birim arttıkça, uyku süresi ortalama 0.484 saat artıyor.
+#İlk modele göre etkisi biraz daha yüksek.
+
+#ReadingTime (beta2):Okuma yapılan süre 1 birim arttıkça, uyku süresi 0.2909 saat artıyor.
+
+#PhoneTime (beta3):Telefon kullanımı 1 birim arttıkça, uyku süresi -0.5856 saat azalıyor.
+
+#WorkHours (beta4):Çalışma süresi 1 birim arttıkça, uyku süresi -0.3900 saat azalıyor.
+
+#CaffeineIntake (beta5):Kafein tüketimi 1 birim arttıkça, uyku süresi -0.0019 saat azalıyor.
+
+#RelaxationTime (beta6):Dinlenme süresi 1 birim arttıkça, uyku süresi 0.391 saat artıyor.
+
+#Telefon kullanımı ve çalışma saatleri uyku süresi üzerinde en negatif etkilerden biri.
+#Egzersiz, okuma ve dinlenme ise olumlu etkiler sağlıyor.
+```
+
+## Modellerin performans metrikleri üzerinden kıyaslanması
+```{r}
+# AIC ve BIC tanımı:::
+AIC(model1,k=8)
+AIC(model2,k=8)
+
+## ## AIC değeri, modelin uygunluğunu ve basitliğini değerlendirir. 
+## Daha düşük bir AIC değeri, modelin veri setine daha iyi uyduğunu gösterir.
+## o yüzden -3869.843 olan AIC (model 2 için) 3284.432 olan AIC (model1)'den daha iyidir
+
+# AIC, yalnızca modelin ne kadar iyi tahmin ettiğini değil, 
+#aynı zamanda gereksiz karmaşıklıktan ne kadar kaçındığını da değerlendirir.
+# İyi bir model ise hem basit hem de etkili olmalıdır.
+
+BIC(model1)
+BIC(model2)
+
+## model1 = "3279.293" Yüksek BIC değeri, modelin veriye uyum sağlayamadığını göstermekte. 
+#Yani olumsuz etkilemiş
+## model2 = "-3875.417" Düşük BIC değeri, modelin veri setine hem daha iyi uyum sağladığını 
+#hem de daha sade olduğunu kanıtlıyor.
+
+# AIC VE BIC NEDEN ÖNEMLİ HANGİSİ?
+# Küçük veri setinde: AIC genelde daha iyi sonuç verir çünkü karmaşıklığı daha AZ cezalandırır.
+# Büyük veri setinde: BIC genelde daha iyidir çünkü daha fazla örnek varsa karmaşık 
+#modelleri AĞIR cezalandırır.
+
+```
+
+## Modelin test verisi üzerinden değerlendirilmesi
+```{r}
+
+
+model1pred<-predict(model1,testset)
+
+model2pred<-predict(model2,testset)
+
+model1preddata<-data.frame("gercekdegerler"=testset$SleepTime,"tahminler"=model1pred)
+model2preddata<-data.frame("gercekdegerler"=testset$SleepTime,"tahminler"=model2pred)
+
+model1hata<-model1preddata$gercekdegerler-model1preddata$tahminler
+model2hata<-model2preddata$gercekdegerler-model2preddata$tahminler
+
+
+# Model performans metrikleri üzerinden değerlendirme
+R2(model1preddata$tahminler, testset$SleepTime)
+R2(model2preddata$tahminler, testset$SleepTime)
+RMSE(model1preddata$tahminler, testset$SleepTime)
+RMSE(model2preddata$tahminler, testset$SleepTime)
+MAE(model1preddata$tahminler, testset$SleepTime)
+MAE(model2preddata$tahminler, testset$SleepTime)
+
+# model1 ve model2 'nin performans metriklerini karşılaştırdığımızda, 
+#R^2 değerlerinin çok yakın olduğunu görüyoruz
+#(model1: 0.8502043, model2:  0.8497381), yani her iki model de 
+#toplam varyansın %85'ini açıklayabiliyor.
+
+#Ancak mutlak hataların küçüklüğü önemsendiği durumda yani minimum hata ile 
+#çalışmayı amaçladığımızda model2'nin model1'den üstün olduğunu gözlemlemekteyiz;
+#> MAE(model1preddata$tahminler, testset$SleepTime)
+#> [1] 0.148773
+#> MAE(model2preddata$tahminler, testset$SleepTime)
+#> [1] 0.1094065
+
+
+```
+
+## Varsayımların Değerlendirilmesi
+```{r}
+#MODELLERİMİZİ ELDE ETTİK,KARŞILAŞTIRDIK,VARSAYIMLARIN DEĞERLENDİRMESİNİ YAPACAĞIZ.
+# Hatalar ile tahmin edilen değerler arasındaki ilişkiyi gösteren grafik
+plot(model2$fitted.values,model2$residuals,main="degisen varyans durumu",
+     xlab="fitted",ylab="residual")
+abline(h=0,col="red")
+#DEĞİŞEN VARYANSLILIK VARSAYIMI;
+#BREUSH-PAGAN TESTİ;
+#H0:DEĞİŞEN VARYANS YOK
+#H1:DEĞİŞEN VARYANS VAR.
+
+model2kok <- lm(sqrt(SleepTime)~.,data=egitimsettemiz)
+
+#bp testi uygulanmadan önce kök dönüşümü uygulandı.
+
+#BREUSH-PAGAN TESTİ
+bptest(sqrt(SleepTime)~.,data=egitimsettemiz)
+# P value 0.05'ten küçük o yüzden h0 'ı reddettik .
+#Bundan dolayı değişen varyanslılık durumunun kök dönüşümüne
+#rağmen devam ettiğini görüyoruz.
+
+
+# Normallik Varsayımı
+#NORMAL DAĞILIM İNCELEMESİNİ ÖNCELİKLE Q-Q PLOT ÜZERİNDEN YAPALIM.
+qqnorm(residuals(model2kok), ylab = "Hatalar")
+qqline(residuals(model2kok), col = "red")
+hist(residuals(model2kok))
+
+#NORMALLİK VARSAYIMI İÇİN HİPOTEZLERİMİZE KARAR VERELİM VE SHAPIRO-WILK TESTİ UYGULAYALIM.
+#ÖNCE HİPOTEZLERE KARAR VERELİM.
+#H0:NORMAL DAĞILIM VAR
+#H1:SAPMA VAR,N.D. YOK.
+shapiro.test(residuals(model2kok))
+#P DEĞERİ 0.00000000002 ÇIKTIĞI İÇİN H0 REDDEDİLİR.VERİ NORMAL DAĞILMAMAKTADIR.
+
+```
+
+## Weighted Least Squares - Ağırlıklandırılmış kare dönüşümü : Değişken varyans durumunu çözebilmek için alternatif bir yol deniyoruz.
+```{r}
+weights <- 1 / lm(abs(residuals(model2kok)) ~ fitted(model2kok))$fitted.values^2
+wls_model <- lm(sqrt(SleepTime) ~ ., data = egitimsettemiz, weights = weights)
+summary(wls_model)
+#WLS DÖNÜŞÜMÜ UYGULADIĞIMIZ MODELİN ÜZERİNDEN TEKRAR BPTEST UYGULAYALIM
+#BREUSH-PAGAN TESTİ;
+#H0:DEĞİŞEN VARYANS YOK
+#H1:DEĞİŞEN VARYANS VAR.
+bptest(sqrt(SleepTime) ~ ., data = egitimsettemiz, weights = weights)
+#WLS dönüşümüne rağmen modelimizde bulunan değişen varyans durumu düzeltilememiştir.
+```
+
+## OTOKORELASYON testi.
+```{r}
+# OTOKORELASYON VARSAYIMI İÇİN DURBIN-WATSON TESTI KULLANILIR.
+# HIPOTEZLERE KARAR VERELİM.
+# H0:HATALAR İLİŞKİLİ DEĞİLLERDİR
+# H1:HATALAR İLİŞKİLİDİRLER.
+# TEST SONUCU YAKLAŞIK 2 İSE OTOKORELASYON YOKTUR.
+# 2'DEN OLDUKÇA BÜYÜKSE NEGATİF OTOKORELASYON VARDIR.
+# 2'DEN ÇOK KÜÇÜK DEĞERLER İSE POZİTİF OTOKORELASYON VARDIR.
+
+
+n <- length(residuals(model2))
+plot(tail(residuals(wls_model), n - 1),head(residuals(wls_model), n - 1),
+     xlab = expression(hat(epsilon)[i]),ylab = expression(hat(epsilon)[i - 1]))
+
+dwtest(sqrt(SleepTime)~.,data=egitimsettemiz)
+
+# DWTEST=2.064~2 olduğundan ötürü Otokorelasyon yoktur.
+#P-VALUE=0.89 olduğundan H0 reddetmek için yeterli kanıt yoktur.
+#Yani Hatalar İlişkili Değillerdir.
+```
+
+## MULTICOLINEARY TEST
+```{r}
+
+#BAĞIMSIZ DEĞİŞKENLERİN İLİŞKİSİZ OLMASI VARSAYIMI.
+
+# MULTICOLINEARY'NIN NEDEN OLDUĞU SORUNLAR:BETALARA İLİŞKİN VARYANSLARI ŞİŞİRİR.
+#t_hesaplar küçülür.Modelde olması gereken değişkeni 
+#yanlışlıkla modelden atmak zorunda kalıyoruz.
+
+#VIF VARYANS ŞİŞİRME FAKTÖRÜ;1/1-R^2
+
+#BUNU BULMANIN YOLU;4 TANE BAĞIMSIZ DEĞİŞKENİMİZ İÇİM VİF1 BULACAĞIZ
+#X1 DEĞERİNİ BAĞIMLI OLARAK ALDIK. GERİ KALAN X2,X3,X4 BAĞIMSIZ OLDU.
+#BUNLARI KULLANARAK OLUŞTURDUĞUMUZ MODELİN R^2'Sİ FORMÜLDE KULLANILACAKTIR.
+#VIF2'Yİ BULMAK İSTERSEK BU SEFER X2 BAĞIMLI DİĞERLERİ BAĞIMSIZ OLACAKTIR.
+
+#VIF<10 ISE PROBLEM YOKTUR.>10 VE BÜYÜKLÜK NE KADAR ARTARSA SORUN O KADAR ARTAR.
+
+# DEĞİŞKENİ ATMAYIP ÇÖZMEK İSTİYORSAK ÇÖZÜMLER;
+# YENİ DEĞİŞKENLER EKLEMEK
+# İÇ İLİŞKİYİ ORTADAN KALDIRMAK:TEMEL BİLEŞENLER ANALİZİ YAPMAK
+# MODELİ DEĞİŞTİRMEK:REGRESYON MODELİMİZİ DEĞİŞTİRECEĞİZ.
+# ---VIF HESAPLATMA---#
+vif(wls_model)
+#BÜTÜN HEPSİ 10'UN ALTINDA ÇIKTIĞI İÇİN BİR SORUN YOK.MULTICOL PROBLEMİ GÖZLENMEMİŞTİR.
+
+```
+
+##STEPWISE(AŞAMALI) REGRESYON UYGULAMASI
+```{r}
+#EN DÜŞÜK AIC DEĞERİNİ ELDE EDECEK BİR MODEL KURMAK İÇİN 
+#HANGİ SIRAYLA İLERLEMEMİZ GEREKTİĞİ HAKKINDA BİZE YOL GÖSTERMESİ ADINA 
+#STEPWISE REGRESYON YÖNTEMLERİNDEN "BACKWARD" YÖNTEMİNİ KULLANACAĞIZ.
+step(lm(sqrt(SleepTime) ~ ., data = egitimsettemiz, weights = weights),
+     direction = "backward",
+     scope=~WorkoutTime+ReadingTime+PhoneTime+WorkHours+CaffeineIntake+RelaxationTime)
+
+#AŞAMALI REGRESYON SONUÇLARI İNCELENDİĞİNDE;
+#HİÇBİR DEĞİŞKENİN MODELDEN ÇIKARILMASI UYGUN DEĞİLDİR.
+#Başlangıç modelimiz optimaldir.
+#Özellikle PhoneTime ve WorkHours değişkenleri model için en kritik değişkenlerdir.
+#Modelden çıkarılmaları AIC değerini oldukça kötü etkilemiştir.
+
+
+
+
+
+
+```
